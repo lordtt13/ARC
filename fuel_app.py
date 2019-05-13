@@ -53,8 +53,23 @@ copy_one['Amount Per Day'] = [sum(x)/sum(max_days) for x in odometer]
 copy_one['Total Amount'] = [sum(x) for x in odometer]
 copy_one['Quantity'] = [sum(x) for x in quantity]
 copy_one["Odometer Data"] = hexa_comp
-copy_one['Total Distance Travelled'] = [max(i) - min(i) for i in hexa_comp]
 copy_one = copy_one.fillna(0)
+
+real_vals = []
+for i in hexa_comp:
+    real = [j for j in i if(j!=0)]
+    real_vals.append(real)
+
+
+actual_dist = []
+for i in real_vals:
+    if(len(i) > 0):
+        actual_dist.append(max(i) - min(i))
+    else:
+        actual_dist.append(0)
+
+copy_one['Total Distance Travelled'] = actual_dist
+copy_one['Mileage'] = [i/j for i,j in zip(actual_dist,copy_one['Quantity'])]
 
 copy_double = []
 vehicles = []
@@ -84,17 +99,18 @@ for i in copy_fifth:
         
 mean_odo = int(np.mean(copy_sixth))
 
-def threshold(arr,mean_arr):
+def threshold(arr,mean_arr,n):
     j = 0.01
     excess = []
-    while(len(excess) < 0.75*len(arr)):
+    while(len(excess) < n*len(arr)):
         excess = [i for i in arr if(i > mean_arr - j*mean_arr and i < mean_arr + j*mean_arr)]
         j += 0.01
     return min(excess),max(excess)
     
-min_amt,max_amt = threshold(copy_one['Amount Per Day'],copy_one['Amount Per Day'].mean())
-min_fuel,max_fuel = threshold(copy_one['Quantity'],copy_one['Quantity'].mean())
-min_dis,max_dis = threshold(copy_one['Total Distance Travelled'],copy_one['Total Distance Travelled'].mean())
+min_amt,max_amt = threshold(copy_one['Amount Per Day'],copy_one['Amount Per Day'].mean(),0.75)
+min_fuel,max_fuel = threshold(copy_one['Quantity'],copy_one['Quantity'].mean(),0.75)
+min_dis,max_dis = threshold(copy_one['Total Distance Travelled'][copy_one['Total Distance Travelled'] < 100000],copy_one['Total Distance Travelled'][copy_one['Total Distance Travelled'] < 100000].mean(),0.75)
+min_mileage,max_mileage = threshold(copy_one['Mileage'][copy_one['Mileage'] < 50],copy_one['Mileage'][copy_one['Mileage'] < 50].mean(),0.75)
 
 is_outlier_amt = []
 for i in copy_one['Amount Per Day']:
@@ -158,12 +174,18 @@ regressor.fit(x_train,y_train)
 from sklearn.metrics import mean_squared_error
 print(mean_squared_error(y_test,regressor.predict(x_test)))
 
-from keras.models import Model
+from keras.models import Model, load_model
 from keras.layers import Dense, Input
 from keras.callbacks import ModelCheckpoint
 
 x_data_use = copy_one[['Amount Per Day','Quantity','Total Distance Travelled','Fuel Outlier','Distance Difference Outlier','Odometer Entry Defaulter']].values
 y_data_use = copy_one.iloc[:,-1].values
+
+from sklearn.preprocessing import MinMaxScaler
+scaler1 = MinMaxScaler()
+scaler2 = MinMaxScaler()
+y_data_use = scaler1.fit_transform(np.reshape(y_data_use,(-1,1)))
+x_data_use = scaler2.fit_transform(x_data_use)
 
 input_ = Input(shape = (6,))
 reg = Dense(256, activation = 'relu')(input_)
@@ -183,8 +205,19 @@ filepath = "weight-improvement-{epoch:02d}-{loss:4f}.hd5"
 checkpoint = ModelCheckpoint(filepath,monitor='loss',verbose=1,save_best_only=True,mode='min')
 callbacks=[checkpoint]
 
-model.fit(x_data_use,y_data_use,epochs = 100,batch_size = 10,callbacks = callbacks, validation_split = 0.25)
+model.fit(x_data_use,y_data_use,epochs = 100,batch_size = 32,callbacks = callbacks, validation_split = 0.25)
 
+model.save('reg.h5')
+
+model = load_model('reg.h5')
+
+def predict_value(i):
+    i = scaler2.transform(np.reshape(i,(1,-1)))
+    return np.rint(scaler1.inverse_transform(model.predict([i,])))
+
+predict_value([5.44828163e+02, 1.17819100e+03, 7.11840000e+04, 0.00000000e+00,
+        1.60000000e+01, 9.00000000e+00])
+    
 plt.scatter(copy_one['PRV No.'],copy_one['Quantity'])
 plt.title('Scatter Plot')
 plt.xlabel('PRV No.')
@@ -198,7 +231,7 @@ plt.ylabel('Fuel Consumed per Day in INR')
 plt.show()
 
 plt.scatter(copy_one['PRV No.'],copy_one['Total Distance Travelled'])
-plt.ylim([0,1e+06])
+plt.ylim([0,1e+05])
 plt.title('Scatter Plot')
 plt.xlabel('PRV No.')
 plt.ylabel('Total Distance Travelled')
@@ -209,4 +242,10 @@ plt.scatter(copy_one['Quantity'],copy_one['Total Amount'])
 plt.title('Scatter Plot')
 plt.xlabel('PRV No.')
 plt.ylabel('Total Fuel Consumed in INR')
+plt.show()
+
+plt.scatter(copy_one['PRV No.'][copy_one['Mileage'] < 50],copy_one['Mileage'][copy_one['Mileage'] < 50])
+plt.title('Scatter Plot')
+plt.xlabel('PRV No.')
+plt.ylabel('Mileage')
 plt.show()
