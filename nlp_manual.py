@@ -104,6 +104,10 @@ X = cv.fit_transform(actual_split).toarray()
 V = cv.vocabulary_
 B = cv.get_feature_names()
 
+from sklearn.decomposition import PCA
+pca = PCA(n_components = 50)
+X = pca.fit_transform(X)
+
 from sklearn.cluster import KMeans
 wcss = []
 for i in range(1,11):
@@ -117,12 +121,14 @@ plt.ylabel('WCSS')
 plt.savefig('Satisfied Initial Cluster WCSS.png', dpi = 500)
 plt.show()
 
-kmeans = KMeans(n_clusters = 5, init = 'k-means++', max_iter = 300, n_init = 10)
+opt = 5
+
+kmeans = KMeans(n_clusters = opt, init = 'k-means++', max_iter = 300, n_init = 10)
 y_kmeans = kmeans.fit_predict(X)
 
 copy_actual['Cluster Level 3'] = list(y_kmeans)
 
-for j in range(5):
+for j in range(opt):
     n = []
     for i in copy_actual['Conversation'][copy_actual['Cluster Level 3'] == j]:
         n.append(i)
