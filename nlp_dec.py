@@ -12,6 +12,7 @@ from dec import DEC
 from collections import Counter
 from wordcloud import WordCloud
 from keras.optimizers import SGD
+from sklearn.cluster import KMeans
 from sklearn.feature_extraction.text import CountVectorizer
 
 # Data Read and Sort
@@ -24,9 +25,9 @@ data.sort_values('Timestamp',axis = 0,ascending = False,inplace = True)
 
 data = data[['Conversation','Timestamp']]
 
-data = data[:100000]
+data = data[:500000]
 
-stopwords = ['q','p','ans','remark','comment',' ans',' q',' remark',' comment',' p','do you want to share any additional feedback']
+stopwords = ['q','p','ans','comment',' ans',' q',' comment',' p','do you want to share any additional feedback']
 
 # Wordcloud make and Plot Func
 def make_wordcloud(optimum,arr,a,str_lit):
@@ -90,19 +91,24 @@ copy['Cluster Level 2'] = c
 copy = copy[copy['Satisfaction Feedback'] != ' ']
 
 # Data made for Model
+def remarks(arr):
+    med = []
+    for i in arr:
+        review = ' '.join(i)
+        review = review.split()
+        if('remark' in review):
+            med.append(' '.join(review[review.index('remark')+1:]))
+        else:
+            med.append('remark not given')
+    return med
+
+copy['Remarks'] = remarks(copy['Conversation'])
+
 def preprocess(literal,Level,arr):
     copy_actual = arr[arr[literal] == Level]
-
-    actual = []
-    for i in copy_actual['Conversation']:
-        review = i[4:]
-        review = ' '.join(review)
-        actual.append(review)
-    
-    copy_actual['Conversation'] = actual
     
     actual_words = []
-    for i in actual:
+    for i in copy_actual['Remarks']:
         review = i.split()
         for j in review:
             actual_words.append(j)
@@ -113,15 +119,17 @@ def preprocess(literal,Level,arr):
     for i,j in zip(counts,counts.values()):
         if(j < 2 or j > 1000):
             actual_stopwords.append(i)
+        elif(len(list(i)) < 3):
+            actual_stopwords.append(i)
             
     actual_split = []
-    for i in copy_actual['Conversation']:
+    for i in copy_actual['Remarks']:
         review = i.split()
         review = [word for word in review if not word in actual_stopwords]
         actual_split.append(' '.join(review))
     
-    copy_actual['Conversation'] = actual_split
-    copy_actual = copy_actual[copy_actual['Conversation'] != '']
+    copy_actual['Remarks'] = actual_split
+    copy_actual = copy_actual[copy_actual['Remarks'] != '']
     
     while '' in actual_split:
         actual_split.remove('')
@@ -133,13 +141,25 @@ def preprocess(literal,Level,arr):
         
     return X,V,B,copy_actual
 
+def elbow(X):
+    wcss = []
+    for i in range(1,11):
+        kmeans = KMeans(n_clusters = i, init = 'k-means++', max_iter = 300, n_init =10)
+        kmeans.fit(X)
+        wcss.append(kmeans.inertia_)
+    
+    plt.plot(range(1,11),wcss)
+    plt.title('Elbow graph')
+    plt.xlabel('Number of clusters')
+    plt.ylabel('WCSS') 
+    plt.savefig('Intial Cluster WCSS.png', dpi = 500)
+    plt.show()
 
 X,_,_,copy_actual = preprocess('Cluster Level 2',1,copy)
 
 # Hyperparameters Defined
 init = 'glorot_uniform'
-pretrain_optimizer = 'adam'
-dataset = 'mnist'
+pretrain_optimizer = 'nadam'
 batch_size = 128
 maxiter = 2e4
 tol = 0.001
@@ -156,6 +176,7 @@ init = VarianceScaling(scale=1. / 3., mode='fan_in',
 # [-limit, limit], limit=sqrt(1./fan_in)
 #pretrain_optimizer = SGD(lr=1, momentum=0.9)
 
+# Pretraining and Training
 dec = DEC(dims=[X.shape[-1], 500, 500, 2000, 10], n_clusters=3, init=init)
 
 dec.pretrain(x=X, optimizer=pretrain_optimizer,
@@ -170,6 +191,8 @@ y_pred = dec.fit(X, tol=tol, maxiter=maxiter, batch_size=batch_size,
                  update_interval=update_interval, save_dir=save_dir)
 
 copy_actual['Cluster Level 3'] = list(y_pred)
+
+copy_actual.to_csv('Satisfied Clustering.csv', encoding='utf-8', index=False)
 
 make_wordcloud(3,copy_actual,'CLuster Level 3','Satisfied DEC Cluster')
 
@@ -189,5 +212,7 @@ y_pred_not = dec_not.fit(X_1, tol=tol, maxiter=maxiter, batch_size=batch_size,
                  update_interval=update_interval, save_dir=save_dir)
 
 copy_actual_not['Cluster Level 3'] = list(y_pred_not)
+
+copy_actual_not.to_csv('Not Satisfied Clustering.csv', encoding='utf-8', index=False)
         
 make_wordcloud(3,copy_actual_not,'Cluster Level 3','Not Satisfied DEC Cluster')
